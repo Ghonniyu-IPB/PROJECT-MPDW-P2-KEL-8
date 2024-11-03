@@ -1,0 +1,523 @@
+---
+title: "PROJECT MPDW P2 KELOMPOK 8"
+author: "P2 Kelompok 8"
+date: "2024-10-23"
+output: rmdformats::readthedown
+css: orangestyle.css
+---
+## Library
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(tsibble)
+library(tseries)
+library(MASS)
+library(forecast)
+library(TSA)
+library(TTR)
+library(aTSA)
+library(graphics)
+library(readxl)
+library(fGarch)
+library(FinTS)
+library(rugarch)
+```
+
+# SUMBER DATA
+
+Topik : Pariwisata  
+Data : Penumpang Tiba Internasional dari sebnyak 731 Periode (1 Januari 2022-1 Januari 2024)  
+Sumber : SIASATI | SISTEM INFORMASI ANGKUTAN DAN SARANA TRANSPORTASI INDONESIA, Kementerian Perhubungan  
+
+
+# ARIMA
+## Input Data
+```{r}
+mpdw <- read_xlsx("C:/Users/Ghonniyu/Downloads/MPDW - Copy.xlsx")
+Penumpang <- mpdw$Penumpang
+DataP <- ts(Penumpang)
+class(DataP)
+```
+
+## Eksplorasi Data
+```{r}
+ts.plot(DataP, xlab="Time Period ", ylab="Penumpang", main= "Time Series Plot of Penumpang ")
+```
+
+### Interpolasi data
+```{r}
+library(imputeTS)
+
+# Mengganti nilai 0 dengan NA untuk memungkinkan interpolasi
+DataP[DataP == 0] <- NA
+
+# Interpolasi linier pada data time series
+DataP_spline <- na_interpolation(DataP, option = "spline")
+```
+
+```{r}
+ts.plot(DataP_spline, xlab="Time Period ", ylab="Penumpang", main= "Time Series Plot of Penumpang ")
+```
+
+### Data Latih
+```{r}
+TrainP <- DataP_spline[1:550] |> ts()
+ts.plot(TrainP, xlab="Time Period ", ylab="Penumpang", main= "Time Series Plot Data Latih")
+```
+
+### Data Uji
+```{r}
+TestP <- DataP_spline[551:731] |> ts()
+ts.plot(TestP, xlab="Time Period ", ylab="Penumpang", main= "Time Series Plot Data Uji")
+```
+
+
+## Uji Stasioneritas Data
+### Stasioner dalam Rataan
+#### Plot ACF
+```{r}
+acf(TrainP)
+```
+Berdasarkan plot ACF, terlihat bahwa plot ACF tersebut tidak stasioner dalam rataan
+
+#### Uji ADF
+```{r}
+tseries::adf.test(TrainP)
+```
+$H_0$ : Data tidak stasioner dalam rataan
+
+$H_1$ : Data stasioner dalam rataan
+
+Berdasarkan uji ADF tersebut, didapat *p-value* sebesar 0.01 yang lebih kecil dari taraf nyata 5% sehingga tolak $H_0$ dan menandakan bahwa data stasioner dalam rataan. Hal ini berbeda  dengan hasil eksplorasi menggunakan plot time series dan plot ACF, sehingga kami mengambil kesimpulan untuk mengikuti hasil eksplorasi. Ketidakstasioneran model kedepannya harus ditangani.
+
+### Stasioneritas dalam Ragam
+```{r}
+index <- seq(1:550)
+bc = boxcox(TrainP~index, lambda = seq(0.8,1.1,by=0.1))
+#Nilai Rounded Lambda
+lambda <- bc$x[which.max(bc$y)]
+lambda
+#SK
+bc$x[bc$y > max(bc$y) - 1/2 * qchisq(.95,1)]
+```
+
+## Penanganan Stasioneritas dalam Rataan
+```{r}
+train.diff<-diff(TrainP,differences = 1) 
+plot.ts(train.diff, lty=1, xlab="periode", ylab="Penumpang", main="Plot")
+```
+#### Plot ACF penanganan stationer dalam rataan
+
+```{r}
+acf(train.diff)
+```
+
+#### Uji ADF
+```{r}
+tseries::adf.test(train.diff)
+```
+$H_0$ : Data tidak stasioner dalam rataan
+
+$H_1$ : Data stasioner dalam rataan
+
+Sesuai dengan uji adf melihat nilai p-value nya yaitu 0.01 yaitu kurang dari taraf nyata 5% sehingga data latih yang sudah di diff satu kali sudah stasioner dalam rataan. Didukung juga dengan plot acf dengan pola "cut off"
+
+### Pendugaan Parameter Model Tentatif
+
+#### Plot ACF
+
+```{r}
+acf(train.diff)
+```
+Terlihat dari plot acf diindikasi *cut-off* di lag pertama, sehingga plot PACF dianggap *tails-off* dan model tentatifnya adalah ARIMA(0,1,1).
+
+#### Plot PACF
+
+```{r}
+pacf(train.diff)
+```
+
+Berdasarkan plot tersebut, terlihat bahwa plot PACF cenderung *tails off* pada lag ke 1, sehingga jika plot ACF dianggap *cut-off*, maka model tentatifnya adalah ARIMA(0,1,1).
+
+#### Plot EACF
+
+```{r}
+eacf(train.diff)
+```
+Identifikasi model menggunakan plot EACF dilakukan dengan melihat ujung segitiga pada pola segitiga nol. Dalam hal ini model tentatif yang dapat terbentuk adalah ARIMA(0,1,1), ARIMA(1,1,2), ARIMA (3,1,2), dan ARIMA (4,1,3)
+
+
+### Pemilihan Parameter Model Tentatif
+
+#### ARIMA(0,1,1)
+
+```{r}
+model1.da=Arima(train.diff, order=c(0,0,1),method="ML")
+summary(model1.da) 
+lmtest::coeftest(model1.da) 
+```
+
+#### ARIMA(1,1,2)
+
+```{r}
+model2.da=Arima(train.diff, order=c(1,0,2),method="ML")
+summary(model2.da) 
+lmtest::coeftest(model2.da) 
+```
+
+#### ARIMA(3,1,2)
+
+```{r}
+model3.da=Arima(train.diff, order=c(3,0,2),method="ML")
+summary(model3.da) 
+lmtest::coeftest(model3.da) 
+```
+
+
+#### ARIMA(3,1,3)
+
+```{r}
+model4.da=Arima(train.diff, order=c(3,0,3),method="ML")
+summary(model4.da) 
+lmtest::coeftest(model4.da) 
+```
+
+#### ARIMA(4,1,3)
+
+```{r}
+model5.da=Arima(train.diff, order=c(4,0,3),method="ML")
+summary(model5.da) 
+lmtest::coeftest(model5.da) 
+```
+
+Dari beberapa model tentatif yang terbentuk, didapatkan hanya model ARIMA(0,1,1) yang seluruh parameternya signifikan dengan nilai AIC 9470.9.
+
+## Analisis Sisaan
+Model terbaik hasil pendugaan parameter kemudian dilakukan cek asumsi sisaannya. Sisaan model ARIMA wajib memenuhi asumsi normalitas, kebebasan sisaan, dan kehomogenan ragam. Diagnostik model dilakukan secara eksplorasi dan uji formal.
+
+### Eksplorasi Sisaan
+```{r}
+#Eksplorasi 
+sisaan.da <- model1.da$residuals 
+par(mfrow=c(2,2)) 
+qqnorm(sisaan.da) 
+qqline(sisaan.da, col = "blue", lwd = 2) 
+plot(c(1:length(sisaan.da)),sisaan.da) 
+acf(sisaan.da) 
+pacf(sisaan.da) 
+par(mfrow = c(1,1))
+```
+
+Berdasarkan plot kuantil-kuantil normal, secara eksplorasi ditunjukkan diduga sisaannya tidak  menyebar normal ditandai dengan titik-titik akhir yang tidak mengikuti garis yang telah dibuat.
+
+Lebar pita sisaan yang cenderung tidak sama menandakan bahwa sisaan memiliki ragam yang heterogen.
+
+Plot ACF dan PACF sisaan ARIMA(5,1,5) menunjukkan ada lag yang tidak signifikan pada 20 lag awal. Menandakan adanya autokorelasi. Kondisi ini akan diuji lebih lanjut dengan uji formal.
+
+### Uji Formal
+#### Sisaan Menyebar Normal 
+```{r}
+shapiro.test(sisaan.da)
+ks.test(sisaan.da,"pnorm")
+```
+
+$H_0$ : Sisaan menyebar normal
+
+$H_1$ : Sisaan tidak menyebar normal
+
+Berdasarkan uji KS tersebut, didapat *p-value* sebesar 2.2e-16 yang kurang dari taraf nyata 5% sehingga tolak $H_0$ dan menandakan bahwa sisaan tidak menyebar normal.
+
+#### Sisaan saling bebas/tidak ada autokorelasi 
+```{r}
+Box.test(sisaan.da, type = "Ljung") 
+```
+
+Selanjutnya akan dilakukan uji formal untuk kebebasan sisaan menggunakan uji Ljung-Box. Hipotesis yang digunakan adalah sebagai berikut.
+
+$H_0$ : Sisaan saling bebas
+
+$H_1$ : Sisaan tidak tidak saling bebas
+
+Berdasarkan uji Ljung-Box tersebut, didapat *p-value* sebesar 0.7739 yang lebih besar dari taraf nyata 5% sehingga tak tolak $H_0$ dan menjelaskan sisaannya saling bebas. 
+
+#### Sisaan Homogen
+```{r}
+Box.test((sisaan.da)^2, type = "Ljung")  
+```
+
+$H_0$ : Ragam sisaan homogen
+
+$H_1$ : Ragam sisaan tidak homogen
+
+Berdasarkan uji Ljung-Box terhadap sisaan kuadrat tersebut, didapat *p-value* sebesar 4.774e-15 yang kecil dari taraf nyata 5% sehingga tak tolak $H_0$ dan menandakan ragam pada model memiliki sisaan heterogen.
+
+#### Nilai tengah sisaan sama dengan nol 
+```{r}
+t.test(sisaan.da, mu = 0, conf.level = 0.95)
+```
+
+$H_0$ : nilai tengah sisaan sama dengan 0
+
+$H_1$ : nilai tengah sisaan tidak sama dengan 0
+
+Berdasarkan uji-ttersebut, didapat *p-value* sebesar 0.5377 yang lebih besar dari taraf nyata 5% sehingga tak tolak $H_0$ dan menandakan bahwa nilai tengah sisaan sama dengan nol. 
+
+### Kesimpulan Analsis Sisaan
+Setelah dilakukan uji formal pada parameter model ARIMA (0,1,1) didapat bahwa semua uji lolos tetapi uji normalitas dan uji homogenitas tidak terpenuhi.
+
+### Overfitting
+Menggunakan ARIMA (0,1,1) dilakukan overfitting agar melihat apakah model yang didapat sudah bisa dilanjutkan ke proses analisis atau tidak.
+
+```{r}
+model1a.da=Arima(train.diff, order=c(0,0,2),method="ML")
+summary(model1a.da) 
+lmtest::coeftest(model1a.da) 
+```
+
+
+```{r}
+model1b.da=Arima(train.diff, order=c(1,0,1),method="ML")
+summary(model1b.da) 
+lmtest::coeftest(model1b.da) 
+```
+
+Setelah melakukan overfittin didapat bahwa model awal memiliki parameter yang signifikan dibandingkan dengan model yang lain.
+
+## Peramalan
+Peramalan dilakukan sesuai banyaknya data uji test agar dapat dicek nilai kebaikan forecastingnya.
+```{r}
+ramalan.da <- forecast::forecast(model1.da, h = 181) 
+ramalan.da
+data.ramalan.da <- ramalan.da$mean
+plot(ramalan.da)
+```
+
+
+Selanjutnya, dapat dicari nilai akurasi antara hasil ramalan dengan data uji sebagai berikut.
+
+```{r}
+pt_1 <- TrainP[550] 
+hasil.forc.Diff <- data.ramalan.da
+hasil <- diffinv(hasil.forc.Diff, differences = 1) + pt_1
+ts.plot(TrainP, hasil, col = c("blue", "red"))
+```
+Setelah melakukan peramalan didapat hasil ramalan untuk data diatas, agar melihat forecastingnya yang bagus atau tidak perlu melihat tingkat error pada forecastingnya dengan melihat nilai MAPE.
+
+```{r}
+perbandingan.da<-matrix(data=c(head(TestP, n=181), hasil[-1]),
+                     nrow = 181, ncol = 2)
+colnames(perbandingan.da)<-c("Aktual","Hasil Forecast")
+perbandingan.da
+accuracy(ts(hasil[-1]), head(TestP, n=181))
+```
+
+Didapat Hasil MAPE dari ARIMA(0,1,1) adalah 29.30845, hasil ini belum terbaik karna belum ada penanganan ketidakhomogenan ragam. Maka dilakukan ARIMA-Garch
+
+# ARIMA-Garch
+```{r}
+for (i in 1:15) {
+  ArchTest <- ArchTest(model1.da$residuals, lags=i, demean=TRUE)
+  cat("P Value LM Test lag ke", i,"adalah" , ArchTest$p.value, "\n") }
+```
+
+## Garch(0,1)
+```{r}
+modelgabung<-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(0,1)), 
+                  mean.model = list(armaOrder = c(0,1), include.mean = TRUE), 
+                  distribution.model = "std")
+                  
+m.01<-ugarchfit(spec=modelgabung,data=train.diff, out.sample = 181)
+m.01
+```
+
+```{r}
+#Eksplorasi 
+sisaan3.da <- residuals(m.01) 
+par(mfrow=c(2,2)) 
+qqnorm(sisaan3.da) 
+qqline(sisaan3.da, col = "blue", lwd = 2) 
+plot(c(1:length(sisaan3.da)),sisaan3.da) 
+acf(sisaan3.da) 
+pacf(sisaan3.da)
+```
+
+```{r}
+ks.test(sisaan3.da,"pnorm")
+```
+
+Menggunakan Uji KS, model di atas belum lolos uji normalitas
+```{r}
+#Autokol
+Box.test(sisaan3.da, type = "Ljung") 
+```
+Didapat hasil sisaanya tidak saling bebas
+```{r}
+#Homogen
+Box.test((sisaan3.da)^2, type = "Ljung")  
+```
+**Setelah menggunakan penanganan GARCH(0,1), sisaan menjadi homogen**
+
+```{r}
+#Nilai Tengah
+t.test(c(sisaan3.da), mu = 0, conf.level = 0.95)
+```
+
+Berdasarkan uji-ttersebut, didapat *p-value* sebesar 0.5507 yang lebih besar dari taraf nyata 5% sehingga tak tolak $H_0$ dan menandakan bahwa nilai tengah sisaan sama dengan nol.
+
+```{r}
+forc <- ugarchforecast(m.01, data = train.diff, n.ahead = 181)
+ramalan <- forc@forecast$seriesFor[,1]
+pt_1 <- TrainP[550] #nilai akhir data latih
+hasil.forc <- diffinv(ramalan, differences = 1) + pt_1
+Hasil.forc <- hasil.forc[-1]
+
+perbandingan <- data.frame("Aktual"= TestP,
+                           "Ramalan" = Hasil.forc)
+perbandingan
+```
+
+```{r}
+library(forecast)
+accuracy(ts(Hasil.forc), head(TestP, n=181))
+```
+Didapat nilai MAPEnya lebih tinggi yaitu 31.52281 yang dibandingkan dengan  pemodelan ARIMA-nya saja yaitu senilai 29.30845
+
+
+```{r}
+# Menggabungkan data train dan test
+data_gabungan_train_test <- data.frame(
+  Indeks = seq_len(length(c(TrainP, TestP))),  # Indeks untuk x-axis
+  Train = c(TrainP, rep(NA, length(TestP))),    # Data Train
+  Test = c(rep(NA, length(TrainP)), TestP)       # Data Test
+)
+
+# Memuat library ggplot2
+library(ggplot2)
+
+# Membuat plot untuk Data Train dan Data Test
+plot_train_test <- ggplot(data_gabungan_train_test, aes(x = Indeks)) +
+  geom_line(aes(y = Train, color = "Train")) +               # Garis untuk data train
+  geom_line(aes(y = Test, color = "Test")) +                 # Garis untuk data test
+  labs(title = "Perbandingan Data Train dan Test",
+       x = "Indeks",
+       y = "Nilai") +
+  scale_color_manual(name = "Legenda", 
+                     values = c("Train" = "blue", "Test" = "green")) +
+  theme_minimal()
+
+# Menampilkan plot
+print(plot_train_test)
+
+```
+
+
+```{r}
+# Menggabungkan data train dan hasil ramalan
+data_gabungan_train_ramalan <- data.frame(
+  Indeks = seq_len(length(c(TrainP, Hasil.forc))),  # Indeks untuk x-axis
+  Nilai = c(TrainP, Hasil.forc),                     # Nilai untuk data Train dan Ramalan
+  Tipe = c(rep("Train", length(TrainP)), rep("Ramalan", length(Hasil.forc)))  # Kategori untuk Train dan Ramalan
+)
+
+# Membuat plot untuk Data Train dan Hasil Ramalan
+plot_train_ramalan <- ggplot(data_gabungan_train_ramalan, aes(x = Indeks, y = Nilai, color = Tipe)) +
+  geom_line() +                                         # Garis untuk data train dan ramalan
+  labs(title = "Perbandingan Data Train dan Hasil Ramalan",
+       x = "Indeks",
+       y = "Nilai") +
+  scale_color_manual(name = "Legenda", 
+                     values = c("Train" = "blue", "Ramalan" = "red")) +
+  theme_minimal()
+
+# Menampilkan plot
+print(plot_train_ramalan)
+```
+
+## Garch(1,1)
+```{r}
+modelgabung<-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)), 
+                  mean.model = list(armaOrder = c(1,1), include.mean = TRUE), 
+                  distribution.model = "std")
+                  
+m.11<-ugarchfit(spec=modelgabung,data=train.diff, out.sample = 181)
+m.11
+```
+
+```{r}
+#Eksplorasi 
+sisaan3.da <- residuals(m.11) 
+par(mfrow=c(2,2)) 
+qqnorm(sisaan3.da) 
+qqline(sisaan3.da, col = "blue", lwd = 2) 
+plot(c(1:length(sisaan3.da)),sisaan3.da) 
+acf(sisaan3.da) 
+pacf(sisaan3.da)
+```
+
+```{r}
+ks.test(sisaan3.da,"pnorm")
+```
+
+Menggunakan Uji KS, model di atas belum lolos uji normalitas
+```{r}
+#Autokol
+Box.test(sisaan3.da, type = "Ljung") 
+```
+Didapat hasil sisaanya tidak saling bebas
+```{r}
+#Homogen
+Box.test((sisaan3.da)^2, type = "Ljung")  #tak tolak H0 > sisaan homogen
+```
+Setelah menggunakan penanganan GARCH(1,1), sisaan tetap tidak homogen
+```{r}
+#Nilai Tengah
+t.test(c(sisaan3.da), mu = 0, conf.level = 0.95)
+```
+
+Berdasarkan uji-ttersebut, didapat *p-value* sebesar 0.9008 yang lebih besar dari taraf nyata 5% sehingga tak tolak $H_0$ dan menandakan bahwa nilai tengah sisaan sama dengan nol.
+
+
+```{r}
+forc <- ugarchforecast(m.11, data = train.diff, n.ahead = 181)
+ramalan <- forc@forecast$seriesFor[,1]
+pt_1 <- TrainP[550] #nilai akhir data latih
+hasil.forc <- diffinv(ramalan, differences = 1) + pt_1
+Hasil.forc <- hasil.forc[-1]
+
+perbandingan <- data.frame("Aktual"= TestP,
+                           "Ramalan" = Hasil.forc)
+perbandingan
+```
+
+```{r}
+library(forecast)
+accuracy(ts(Hasil.forc), head(TestP, n=181))
+```
+
+Sama halnya dengan ARIMA-Garch(0,1) Didapati nilai MAPEnya lebih tinggi yaitu 36.25806 yang dibandingkan dengan  pemodelan ARIMA-nya saja yaitu senilai 29.30845
+
+
+```{r}
+# Menggabungkan data train dan hasil ramalan
+data_gabungan_train_ramalan <- data.frame(
+  Indeks = seq_len(length(c(TrainP, Hasil.forc))),  # Indeks untuk x-axis
+  Nilai = c(TrainP, Hasil.forc),                     # Nilai untuk data Train dan Ramalan
+  Tipe = c(rep("Train", length(TrainP)), rep("Ramalan", length(Hasil.forc)))  # Kategori untuk Train dan Ramalan
+)
+
+# Membuat plot untuk Data Train dan Hasil Ramalan
+plot_train_ramalan <- ggplot(data_gabungan_train_ramalan, aes(x = Indeks, y = Nilai, color = Tipe)) +
+  geom_line() +                                         # Garis untuk data train dan ramalan
+  labs(title = "Perbandingan Data Train dan Hasil Ramalan",
+       x = "Indeks",
+       y = "Nilai") +
+  scale_color_manual(name = "Legenda", 
+                     values = c("Train" = "blue", "Ramalan" = "red")) +
+  theme_minimal()
+
+# Menampilkan plot
+print(plot_train_ramalan)
+```
+
+
+# KESIMPULAN MODEL TERBAIK
+Model terbaik hingga saat ini yaitu menggunakan ARIMA(0,1,1)-GARCH(0,1), dimana sudah memenuhi asumsi kehomogenan dengan MAPE sebesar 31.52281
